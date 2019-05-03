@@ -1,0 +1,2 @@
+# SplitOrStealBot
+Yes
