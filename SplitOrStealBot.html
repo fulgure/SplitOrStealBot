@@ -1,0 +1,230 @@
+<head></head>
+<button id="pauseBtn" onclick="javascript:stopped = !stopped; login();">Pause</button>
+
+<body onload="login()">
+    <script srC="https://code.jquery.com/jquery-3.4.1.min.js"></script>
+    <script>
+        let LOGINPAGE = 'https://splitorsteal.net/Kong/login';
+        let JOINQUEUE = 'https://splitorsteal.net/Queue/join';
+        let STATUSPAGE = 'https://splitorsteal.net/Queue/status';
+        let GAMESTATUS = 'https://splitorsteal.net/Game/status';
+        let ACCEPTGAME = 'https://splitorsteal.net/Game/accept_invite';
+        let SETACTIONPAGE = 'https://splitorsteal.net/Game/set_action';
+        let LOCKINPAGE = 'https://splitorsteal.net/Game/lock_in';
+        let RESULTSPAGE = 'https://splitorsteal.net/Results';
+        let USERPAGE = 'https://splitorsteal.net/User';
+		//Replace USERNAME, USERID & AUTHKEY with the data from the login request
+        let USERNAME = 'USERNAME';
+        let USERID = USERID;
+        let AUTHKEY = 'AUTHKEY';
+        let userToken, sessionToken, gameToken, coins, coinsOut, currTier, currKarma, currStanding;
+        let stopped = false;
+        let alreadyAccepted = false;
+        let alreadyLockedIn = false;
+        let STATUSCHECKINTERVAL = 2000;
+        let intervalId;
+        let totalCoins = 0;
+        let totalKarma = 0;
+        window.setInterval(updateUI, 10000);
+        //On restart la page toute les demies-heure au cas-où
+        window.setInterval(location.reload, 3600 * 1000)
+        function login() {
+            if (!stopped) {
+                $('#pauseBtn').text("Pause");
+                $.post(LOGINPAGE, {
+                    username: USERNAME,
+                    user_id: USERID,
+                    auth_key: AUTHKEY
+                }).done(
+                    function (data) {
+                        userToken = data.user_token;
+                        sessionToken = data.session_token;
+                        coins = data.coins;
+                        coinsOut = data.coins_outstanding;
+                        currTier = data.current_tier;
+                        currKarma = data.karma;
+                        currStanding = data.karma_caption;
+                        $('#wrapper').remove();
+                        $('body').append('<div id="wrapper"></div>');
+                        $('#wrapper').append('<h2 id="status" style="color:green;">Login succesful</h2>');
+                        $('#wrapper').append('<p id="currCoins">Coins:' + coins + '</p>');
+                        $('#wrapper').append('<p id="coinsOut">Coins outstanding : ' + coinsOut + '</p>');
+                        $('#wrapper').append('<p id="currTier">Current tier : ' + currTier + '</p>');
+                        $('#wrapper').append('<p id="currKarma">Current karma : ' + currKarma + '</p>');
+                        $('#wrapper').append('<b id="currStanding">Current standing : ' + currStanding + '</b>');
+                        $('#wrapper').append('<h1 id="totalCoins">Total coins earned : ' + totalCoins + '</h1>');
+                        $('#wrapper').append('<h1 id="totalKarma">Total karma earned : ' + totalKarma + '</h1>');
+                        joinQueue();
+                    });
+            } else {
+                $('#pauseBtn').text("Reprendre");
+            }
+        }
+
+        function joinQueue() {
+            if (!stopped) {
+                $.post(JOINQUEUE,
+                    {
+                        user_token: userToken,
+                        session_token: sessionToken
+                    }).done(function (data) {
+                        updateStatus("Queue joined");
+                        alreadyAccepted = false;
+                        alreadyLockedIn = false;
+                        clearInterval(intervalId);
+                        intervalId = window.setInterval(checkStatus, STATUSCHECKINTERVAL);
+                    }).fail(function (data) {
+                        window.setTimeout(login,5000);
+                    });
+            }
+        }
+
+        function checkStatus() {
+            if (!stopped) {
+                $.post(STATUSPAGE,
+                    {
+                        user_token: userToken,
+                        session_token: sessionToken
+                    }).done(function (data) {
+                        if (!alreadyAccepted && data.game_ready_token.length > 0) {
+                            updateStatus("Match found !");
+                            gameToken = data.game_ready_token;
+                            acceptGame();
+                        } else {
+                            updateStatus("Time in queue : " + data.queue_time_sec + "s");
+                        }
+                    });
+            }
+        }
+
+        function checkGameStatus() {
+            if (!stopped) {
+                $.post(GAMESTATUS,
+                    {
+                        user_token: userToken,
+                        session_token: sessionToken,
+                        game_token: gameToken
+                    }).done(function (data) {
+                        if (!alreadyLockedIn && data.time_remaining <= 115) {
+                            updateStatus("Selecting splitting");
+                            setSplitAction();
+                        } else if (!alreadyLockedIn) {
+                            updateStatus("Waiting to be able to split");
+                        }
+                    }).fail(
+                        function (data) {
+                            updateStatus("Both player locked in !");
+                            clearInterval(intervalId);
+                            getGameResults();
+                        }
+                    );
+            }
+        }
+
+        function getGameResults() {
+            if (!stopped) {
+                $.post(RESULTSPAGE,
+                    {
+                        user_token: userToken,
+                        session_token: sessionToken,
+                        game_token: gameToken
+                    }).done(
+                        function (data) {
+                            if (data.player_1_stole_this_gc != "1" && data.player_2_stole_this_gc != "1") {
+                                updateStatus("Both splitted !");
+                                if (data.player_id_number == 1) {
+                                    totalCoins += parseInt(data.player_1_share_coins_pot);
+                                    totalKarma += parseInt(data.player_1_share_karma_gain);
+                                } else {
+                                    totalCoins += parseInt(data.player_2_share_coins_pot);
+                                    totalKarma += parseInt(data.player_2_share_karma_gain);
+                                }
+                            } else {
+                                updateStatus("The other player stole");
+                            }
+                            updateUI();
+                            joinQueue();
+                        }).fail(function (data) {
+                            login();
+                        });
+            }
+        }
+
+        function updateUI() {
+            if (!stopped) {
+                $.post(USERPAGE,
+                    {
+                        user_token: userToken,
+                        session_token: sessionToken
+                    }).done(function (data) {
+                        userToken = data.user_token;
+                        sessionToken = data.session_token;
+                        coins = data.coins;
+                        coinsOut = data.coins_outstanding;
+                        currTier = data.current_tier;
+                        currKarma = data.karma;
+                        currStanding = data.karma_caption;
+                        $('#currCoins').text('Coins: ' + coins);
+                        $('#coinsOut').text('Coins outstanding : ' + coinsOut);
+                        $('#currTier').text('Current tier : ' + currTier);
+                        $('#currKarma').text('Current karma : ' + currKarma);
+                        $('#currStanding').text('Current standing : ' + currStanding);
+                        $('#totalCoins').text('Total coins earned : ' + totalCoins);
+                        $('#totalKarma').text('Total karma earned : ' + totalKarma);
+                    });
+            }
+        }
+
+        function acceptGame() {
+            if (!stopped) {
+                $.post(ACCEPTGAME,
+                    {
+                        user_token: userToken,
+                        session_token: sessionToken,
+                        game_token: gameToken
+                    }).done(
+                        function (data) {
+                            updateStatus("Match accepted");
+                            alreadyAccepted = true;
+                            clearInterval(intervalId);
+                            intervalId = window.setInterval(checkGameStatus, STATUSCHECKINTERVAL);
+                        });
+            }
+        }
+
+        function setSplitAction() {
+            if (!stopped) {
+                $.post(SETACTIONPAGE,
+                    {
+                        user_token: userToken,
+                        session_token: sessionToken,
+                        game_token: gameToken,
+                        user_action: "share"
+                    }).done(
+                        function (data) {
+                            updateStatus("Selected splitting");
+                            lockChoiceIn();
+                        });
+            }
+        }
+
+        function lockChoiceIn() {
+            if (!stopped) {
+                $.post(LOCKINPAGE,
+                    {
+                        user_token: userToken,
+                        session_token: sessionToken,
+                        game_token: gameToken
+                    }).done(function (data) {
+                        updateStatus("Locked in");
+                        alreadyLockedIn = true;
+                    });
+            }
+        }
+        function updateStatus(text) {
+            if (!stopped) {
+                $('#status').text(text);
+            }
+        }
+    </script>
+</body>
