@@ -4,6 +4,12 @@
 <body onload="login()">
     <script srC="https://code.jquery.com/jquery-3.4.1.min.js"></script>
     <script>
+	//Fill USERNAME,USERID and AUTHKEY with the informations returned by the login call in chrome's network inspector
+	//(F12, Network tab, Press XHR, Reload the page, Click on the "login" request)
+	// /!\Remove the {} but leave the quotes for the username and authkey /!\
+	    let USERNAME = '{Username}';
+        let USERID = {userId};
+        let AUTHKEY = '{Auth_key}';
         let LOGINPAGE = 'https://splitorsteal.net/Kong/login';
         let JOINQUEUE = 'https://splitorsteal.net/Queue/join';
         let STATUSPAGE = 'https://splitorsteal.net/Queue/status';
@@ -13,10 +19,7 @@
         let LOCKINPAGE = 'https://splitorsteal.net/Game/lock_in';
         let RESULTSPAGE = 'https://splitorsteal.net/Results';
         let USERPAGE = 'https://splitorsteal.net/User';
-		//Replace USERNAME, USERID & AUTHKEY with the data from the login request
-        let USERNAME = 'USERNAME';
-        let USERID = USERID;
-        let AUTHKEY = 'AUTHKEY';
+        let CHATPAGE = 'https://splitorsteal.net/Chat';
         let userToken, sessionToken, gameToken, coins, coinsOut, currTier, currKarma, currStanding;
         let stopped = false;
         let alreadyAccepted = false;
@@ -25,9 +28,14 @@
         let intervalId;
         let totalCoins = 0;
         let totalKarma = 0;
+        let numberOfRounds = 0;
+        let lastChatMessageId = 0;
+        let roundsWon = 0;
+
         window.setInterval(updateUI, 10000);
+        $('body').append('<div id="chat" style="float:right;width:66%;background-color:#036;color:white;"></div>');
         //On restart la page toute les demies-heure au cas-où
-        window.setInterval(location.reload, 3600 * 1000)
+        window.setInterval(login, 1800 * 1000)
         function login() {
             if (!stopped) {
                 $('#pauseBtn').text("Pause");
@@ -54,6 +62,8 @@
                         $('#wrapper').append('<b id="currStanding">Current standing : ' + currStanding + '</b>');
                         $('#wrapper').append('<h1 id="totalCoins">Total coins earned : ' + totalCoins + '</h1>');
                         $('#wrapper').append('<h1 id="totalKarma">Total karma earned : ' + totalKarma + '</h1>');
+                        $('#wrapper').append('<h1 id="totalGames">Number of rounds played : ' + numberOfRounds + '</h1>');
+                        $('#wrapper').append('<h1 id="roundsWon">Rounds won : ' + roundsWon + '</h1>');
                         joinQueue();
                     });
             } else {
@@ -74,7 +84,7 @@
                         clearInterval(intervalId);
                         intervalId = window.setInterval(checkStatus, STATUSCHECKINTERVAL);
                     }).fail(function (data) {
-                        window.setTimeout(login,5000);
+                        window.setTimeout(login, 5000);
                     });
             }
         }
@@ -105,7 +115,7 @@
                         session_token: sessionToken,
                         game_token: gameToken
                     }).done(function (data) {
-                        if (!alreadyLockedIn && data.time_remaining <= 115) {
+                        if (!alreadyLockedIn && data.time_remaining <= 109) {
                             updateStatus("Selecting splitting");
                             setSplitAction();
                         } else if (!alreadyLockedIn) {
@@ -113,8 +123,10 @@
                         }
                     }).fail(
                         function (data) {
+                            clearInterval(window.chatInterval);
                             updateStatus("Both player locked in !");
                             clearInterval(intervalId);
+                            chatRequestCount = 0;
                             getGameResults();
                         }
                     );
@@ -139,9 +151,21 @@
                                     totalCoins += parseInt(data.player_2_share_coins_pot);
                                     totalKarma += parseInt(data.player_2_share_karma_gain);
                                 }
+                                roundsWon++;
                             } else {
                                 updateStatus("The other player stole");
+                                if (data.player_id_number == 1) {
+                                    roundsWon -= parseInt(data.player_1_tier);
+                                    totalCoins -= parseInt(data.player_1_share_coins_pot);
+                                } else {
+                                    roundsWon -= parseInt(data.player_2_tier);
+                                    totalCoins -= parseInt(data.player_2_share_coins_pot);
+                                }
+
                             }
+                            numberOfRounds++;
+                            $('#chat').prepend('<hr></hr>')
+                            clearInterval(window.chatInterval);
                             updateUI();
                             joinQueue();
                         }).fail(function (data) {
@@ -171,6 +195,8 @@
                         $('#currStanding').text('Current standing : ' + currStanding);
                         $('#totalCoins').text('Total coins earned : ' + totalCoins);
                         $('#totalKarma').text('Total karma earned : ' + totalKarma);
+                        $('#totalGames').text('Number of rounds played : ' + numberOfRounds);
+                        $('#roundsWon').text('Rounds won : ' + roundsWon);
                     });
             }
         }
@@ -188,6 +214,7 @@
                             alreadyAccepted = true;
                             clearInterval(intervalId);
                             intervalId = window.setInterval(checkGameStatus, STATUSCHECKINTERVAL);
+                            window.chatInterval = window.setInterval(checkChat, STATUSCHECKINTERVAL);
                         });
             }
         }
@@ -221,9 +248,33 @@
                     });
             }
         }
+
         function updateStatus(text) {
             if (!stopped) {
                 $('#status').text(text);
+            }
+        }
+        //On compte pour éviter le spam
+        let chatRequestCount = 0;
+        function checkChat() {
+            if (chatRequestCount <= 15) {
+                $.post(CHATPAGE,
+                    {
+                        user_token: userToken,
+                        session_token: sessionToken,
+                        game_token: gameToken,
+                        last_chat_id: lastChatMessageId
+                    }).done(function (data) {
+                        if (data.chat_messages.length > 0) {
+                            data.chat_messages.forEach(element => {
+                                $('#chat').prepend('<p class="chatElem">[' + element.timestamp + '] ' + element.player_name + ': ' + element.message + '</p>');
+                            });
+                        }
+                        chatRequestCount++;
+                        lastChatMessageId = data.last_chat_id;
+                    });
+            }else{
+                clearInterval(window.chatInterval);
             }
         }
     </script>
